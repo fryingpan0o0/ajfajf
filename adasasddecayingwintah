@@ -1,0 +1,149 @@
+-- SnowToSand | Decaying Winter Edition
+-- Cambia Snow -> Sand tanto en Terrain como en Parts/MeshParts
+-- Compatible con Xeno y otros executors
+
+-- ============================================================
+-- CONFIG
+-- ============================================================
+local DEBUG    = true
+local REALTIME = true
+
+-- ============================================================
+-- UTILIDADES
+-- ============================================================
+local function log(msg)
+    if DEBUG then print("[SnowToSand] " .. tostring(msg)) end
+end
+
+-- ============================================================
+-- 1) TERRAIN: ReplaceMaterial (Snow -> Sand)
+-- ============================================================
+local function fixTerrain()
+    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    if not terrain then
+        log("No se encontro Terrain.")
+        return
+    end
+
+    -- Obtener el tamaño del terrain para el region3
+    local region = terrain:GetExtentsSize()
+    local center = workspace.CurrentCamera
+        and workspace.CurrentCamera.CFrame.Position
+        or Vector3.new(0, 0, 0)
+
+    -- Usar un region3 grande que cubra todo el mapa
+    local size = 8192 -- cubre la mayoria de mapas de Roblox
+    local r3 = Region3.new(
+        Vector3.new(-size, -size, -size),
+        Vector3.new( size,  size,  size)
+    )
+
+    local ok, err = pcall(function()
+        terrain:ReplaceMaterial(r3, 4, Enum.Material.Snow, Enum.Material.Sand)
+        log("Terrain: Snow -> Sand reemplazado en todo el mapa.")
+    end)
+
+    if not ok then
+        log("Error en ReplaceMaterial: " .. tostring(err))
+    end
+end
+
+-- ============================================================
+-- 2) PARTS / MESHPARTS: Material Snow -> Sand
+-- ============================================================
+local TEXTURE_MAP = {
+    -- Agrega IDs especificos de Decaying Winter si los encontras
+    -- ["rbxassetid://XXXXXXX"] = "rbxassetid://YYYYYYY",
+}
+
+local function normalizeId(raw)
+    if not raw or raw == "" then return nil end
+    raw = tostring(raw):lower():gsub("%s", "")
+    local num = raw:match("(%d+)$") or raw:match("id=(%d+)")
+    if num then return "rbxassetid://" .. num end
+    return nil
+end
+
+local function getReplacement(id)
+    local norm = normalizeId(id)
+    if not norm then return nil end
+    return TEXTURE_MAP[norm]
+end
+
+local function process(obj)
+    -- Cambiar Material Snow -> Sand en cualquier BasePart
+    if obj:IsA("BasePart") then
+        if obj.Material == Enum.Material.Snow then
+            log("BasePart Snow->Sand: " .. obj.Name)
+            obj.Material = Enum.Material.Sand
+        end
+    end
+
+    -- Texture / Decal con ID mapeado
+    if obj:IsA("Texture") or obj:IsA("Decal") then
+        local r = getReplacement(obj.Texture)
+        if r then
+            log("Texture: " .. obj.Texture .. " -> " .. r)
+            obj.Texture = r
+        end
+    end
+
+    -- SpecialMesh
+    if obj:IsA("SpecialMesh") then
+        local r = getReplacement(obj.TextureId)
+        if r then
+            log("SpecialMesh: " .. obj.TextureId .. " -> " .. r)
+            obj.TextureId = r
+        end
+    end
+
+    -- MeshPart
+    if obj:IsA("MeshPart") then
+        local r = getReplacement(obj.TextureID)
+        if r then
+            log("MeshPart: " .. obj.TextureID .. " -> " .. r)
+            obj.TextureID = r
+        end
+    end
+end
+
+-- ============================================================
+-- 3) SCAN DE TODOS LOS DESCENDANTS
+-- ============================================================
+local function scanAll()
+    log("Escaneando descendants...")
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        pcall(process, obj)
+    end
+    log("Scan completado.")
+end
+
+-- ============================================================
+-- 4) MONITOR EN TIEMPO REAL
+-- ============================================================
+local function startMonitor()
+    workspace.DescendantAdded:Connect(function(obj)
+        task.defer(function()
+            pcall(process, obj)
+        end)
+    end)
+    log("Monitor activado.")
+end
+
+-- ============================================================
+-- MAIN
+-- ============================================================
+log("Iniciando...")
+
+-- Primero el terrain (lo mas importante)
+fixTerrain()
+
+-- Luego las parts
+scanAll()
+
+-- Monitor para partes nuevas (respawn de nieve, etc)
+if REALTIME then
+    startMonitor()
+end
+
+log("Listo!")
